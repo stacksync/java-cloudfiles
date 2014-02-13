@@ -1,7 +1,6 @@
 package com.rackspacecloud.client.cloudfiles.FilesClientTest;
 
 import java.io.BufferedReader;
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -21,7 +20,6 @@ public class SwiftTestCase_old extends TestCase {
     private int CONNECTION_TIMEOUT = 5000;
     private FilesClient client1 = null, client2 = null;
     private String dummyFileName = "/files/test/dummyfile";
-    private String dummyFolderName = "/files/test";
 
     private boolean loginClient1() {
         boolean connected = false;
@@ -73,10 +71,10 @@ public class SwiftTestCase_old extends TestCase {
     private String inputStreamAsString(InputStream stream) throws IOException {
         BufferedReader br = new BufferedReader(new InputStreamReader(stream));
         StringBuilder sb = new StringBuilder();
-        String line1 = null;
+        String line1;
 
         while ((line1 = br.readLine()) != null) {
-            sb.append(line1 + "\n");
+            sb.append(line1).append("\n");
         }
 
         br.close();
