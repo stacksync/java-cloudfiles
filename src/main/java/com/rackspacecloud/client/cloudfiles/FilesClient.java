@@ -70,7 +70,6 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.rackspacecloud.client.cloudfiles.expections.*;
-import com.rackspacecloud.client.cloudfiles.torrent.FileDownloadedTorrentException;
 import com.rackspacecloud.client.cloudfiles.wrapper.RequestEntityWrapper;
 
 /**
@@ -2458,6 +2457,95 @@ public class FilesClient {
             }
         }
     }
+    
+    /**
+     * Store a file on the server
+     *
+     * @param sharedStorageURL
+     * @param container The name of the container
+     * @param obj The File containing the file to copy over
+     * @param contentType The MIME type of the file
+     * @param name The name of the file on the server
+     * @return The ETAG if the save was successful, null otherwise
+     * @throws IOException There was an IO error doing network communication
+     * @throws HttpException There was an error with the http protocol
+     * @throws FilesException
+     */
+    public String storeSharedObjectAs(String sharedStorageURL, String container, 
+            File obj, String contentType, String name) throws OverQuotaException,
+            FilesException, IOException, HttpException {
+        
+        if (!this.isLoggedin()) {
+            throw new FilesAuthorizationException("You must be logged in", null, null);
+        }
+
+        if (!isValidContainerName(container)) {
+            throw new FilesInvalidNameException(name);
+        }
+
+        if (!isValidObjectName(name)) {
+            throw new FilesInvalidNameException(container);
+        }
+
+        if (!obj.exists()) {
+            throw new FileNotFoundException(name + " does not exist");
+        }
+
+        if (obj.isDirectory()) {
+            throw new IOException("The alleged file was a directory");
+        }
+
+
+        HttpPut method = null;
+        try {
+            method = new HttpPut(sharedStorageURL + "/"
+                    + sanitizeForURI(container) + "/"
+                    + sanitizeForURI(name));
+            method.getParams().setIntParameter("http.socket.timeout", connectionTimeOut);
+            method.setHeader(FilesConstants.X_AUTH_TOKEN, authToken);
+            if (useETag) {
+                method.setHeader(FilesConstants.E_TAG, md5Sum(obj));
+            }
+            //method.setEntity(new RequestEntityWrapper(new FileEntity(obj, contentType), callback));
+            FilesResponse response = new FilesResponse(client.execute(method));
+
+            if (response.getStatusCode() == HttpStatus.SC_UNAUTHORIZED) {
+                method.abort();
+                if (login()) {
+                    method = new HttpPut(sharedStorageURL + "/"
+                            + sanitizeForURI(container) + "/"
+                            + sanitizeForURI(name));
+                    method.getParams().setIntParameter("http.socket.timeout", connectionTimeOut);
+                    method.setHeader(FilesConstants.X_AUTH_TOKEN, authToken);
+                    if (useETag) {
+                        method.setHeader(FilesConstants.E_TAG, md5Sum(obj));
+                    }
+                    //method.setEntity(new RequestEntityWrapper(new FileEntity(obj, contentType), callback));
+                    response = new FilesResponse(client.execute(method));
+                } else {
+                    throw new FilesAuthorizationException("Re-login failed", response.getResponseHeaders(), response.getStatusLine());
+                }
+            }
+            int statusCode = response.getStatusCode();
+
+            switch (statusCode) {
+                case HttpStatus.SC_CREATED:
+                    return response.getResponseHeader(FilesConstants.E_TAG).getValue();
+                case HttpStatus.SC_PRECONDITION_FAILED:
+                    throw new FilesException("Etag missmatch", response.getResponseHeaders(), response.getStatusLine());
+                case HttpStatus.SC_LENGTH_REQUIRED:
+                    throw new FilesException("Length miss-match", response.getResponseHeaders(), response.getStatusLine());
+                case HttpStatus.SC_REQUEST_TOO_LONG:
+                    throw new OverQuotaException("Quota excedeed", response.getResponseHeaders(), response.getStatusLine());
+                default:
+                    throw new FilesException("Unexpected Server Response", response.getResponseHeaders(), response.getStatusLine());
+            }
+        } finally {
+            if (method != null) {
+                method.abort();
+            }
+        }
+    }
 
     /**
      * Copies the file to Cloud Files, keeping the original file name in Cloud
@@ -3075,17 +3163,25 @@ public class FilesClient {
         }
         return null;
     }
-
-    public InputStream getObjectAsStreamTorrent(Long fileId, Long version, String container, String objName)
+    
+    /**
+     * Get's the given shared object's content as a stream
+     *
+     * @param container The name of the container
+     * @param objName The name of the object
+     * @return An input stream that will give the objects content when read
+     * from.
+     * @throws IOException There was an IO error doing network communication
+     * @throws HttpException There was an error with the http protocol
+     * @throws FilesAuthorizationException
+     * @throws FilesNotFoundException The container does not exist
+     * @throws FilesInvalidNameException
+     */
+    public InputStream getSharedObjectAsStream(String sharedStorageURL, String container, String objName)
             throws IOException, HttpException, FilesAuthorizationException,
-            FilesInvalidNameException, FilesNotFoundException, FileDownloadedTorrentException {
-
-        //logger.info("INIT: getObjectAsStreamTorrent storageURL:"+ storageURL);
-
+            FilesInvalidNameException, FilesNotFoundException {
         if (this.isLoggedin()) {
-
             if (isValidContainerName(container) && isValidObjectName(objName)) {
-
                 if (objName.length() > FilesConstants.OBJECT_NAME_LENGTH) {
                     logger.warn("Object Name supplied was truncated to Max allowed of "
                             + FilesConstants.OBJECT_NAME_LENGTH
@@ -3095,78 +3191,38 @@ public class FilesClient {
                     logger.warn("Truncated Object Name is: " + objName);
                 }
 
-                HttpGet method = new HttpGet(storageURL + "/"
+                HttpGet method = new HttpGet(sharedStorageURL + "/"
                         + sanitizeForURI(container) + "/"
                         + sanitizeForURI(objName));
                 method.getParams().setIntParameter("http.socket.timeout",
                         connectionTimeOut);
                 method.setHeader(FilesConstants.X_AUTH_TOKEN, authToken);
-
-                String keyFile = String.valueOf(fileId) + ":" + String.valueOf(version);
-                method.setHeader(FilesConstants.X_CHECK_TORRENT_KEYFILE, keyFile);
-                method.setHeader(FilesConstants.X_AUTHENTICATION_URL, authenticationURL);
-
-                FilesResponse response = new FilesResponse(client.execute(method));
-
+                FilesResponse response = new FilesResponse(
+                        client.execute(method));
 
                 if (response.getStatusCode() == HttpStatus.SC_UNAUTHORIZED) {
-
-                    logger.info("response.getStatusCode() == " + HttpStatus.SC_UNAUTHORIZED);
-
                     method.abort();
                     login();
-                    method = new HttpGet(storageURL + "/"
+                    method = new HttpGet(sharedStorageURL + "/"
                             + sanitizeForURI(container) + "/"
                             + sanitizeForURI(objName));
                     method.getParams().setIntParameter("http.socket.timeout",
                             connectionTimeOut);
                     method.setHeader(FilesConstants.X_AUTH_TOKEN, authToken);
-
-                    method.setHeader(FilesConstants.X_CHECK_TORRENT_KEYFILE, keyFile);
-                    method.setHeader(FilesConstants.X_AUTHENTICATION_URL, authenticationURL);
-
-
                     response = new FilesResponse(client.execute(method));
-
-
                 }
 
                 if (response.getStatusCode() == HttpStatus.SC_OK) {
-
-                    Header header = response.getResponseHeader("BitTorrent");
-
-                    if (header != null) {
-
-                        String message = "Torrent data retreived, " + "Container: " + container + " did not have object " + objName;
-                        logger.info(message);
-
-                        byte[] torrentData = IOUtils.toByteArray(response.getResponseBodyAsStream());
-
-                        FileDownloadedTorrentException fdownlTorException = new FileDownloadedTorrentException(torrentData, message);
-
-                        throw fdownlTorException;
-
-
-                    } else {
-
-                        //logger.info("Object data retreived  : " + objName);
-                        // DO NOT RELEASE THIS CONNECTION
-                        return response.getResponseBodyAsStream();
-                    }
-
-
+                    logger.info("Object data retreived  : " + objName);
+                    // DO NOT RELEASE THIS CONNECTION
+                    return response.getResponseBodyAsStream();
                 } else if (response.getStatusCode() == HttpStatus.SC_NOT_FOUND) {
-
-                    logger.info("response.getStatusCode() == " + HttpStatus.SC_NOT_FOUND);
                     method.abort();
                     throw new FilesNotFoundException("Container: " + container
                             + " did not have object " + objName,
                             response.getResponseHeaders(),
                             response.getStatusLine());
-
                 }
-
-
             } else {
                 if (!isValidObjectName(objName)) {
                     throw new FilesInvalidNameException(objName);
@@ -3174,13 +3230,10 @@ public class FilesClient {
                     throw new FilesInvalidNameException(container);
                 }
             }
-
         } else {
             throw new FilesAuthorizationException("You must be logged in",
                     null, null);
         }
-
-
         return null;
     }
 
