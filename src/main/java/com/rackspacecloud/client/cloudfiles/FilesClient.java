@@ -2506,7 +2506,7 @@ public class FilesClient {
             if (useETag) {
                 method.setHeader(FilesConstants.E_TAG, md5Sum(obj));
             }
-            //method.setEntity(new RequestEntityWrapper(new FileEntity(obj, contentType), callback));
+            method.setEntity(new RequestEntityWrapper(new FileEntity(obj, contentType), null));
             FilesResponse response = new FilesResponse(client.execute(method));
 
             if (response.getStatusCode() == HttpStatus.SC_UNAUTHORIZED) {
@@ -2520,7 +2520,7 @@ public class FilesClient {
                     if (useETag) {
                         method.setHeader(FilesConstants.E_TAG, md5Sum(obj));
                     }
-                    //method.setEntity(new RequestEntityWrapper(new FileEntity(obj, contentType), callback));
+                    method.setEntity(new RequestEntityWrapper(new FileEntity(obj, contentType), null));
                     response = new FilesResponse(client.execute(method));
                 } else {
                     throw new FilesAuthorizationException("Re-login failed", response.getResponseHeaders(), response.getStatusLine());
