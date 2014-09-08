@@ -370,6 +370,80 @@ public class FilesClient {
 
         return isLoggedin;
     }
+    
+    public boolean loginKeystoneV3() throws UnknownHostException, SocketException, IOException, UnauthorizeException {
+        isLoggedin = false;
+
+        String tenantNameKeystone = "";
+        String userNameKeystone = username;
+        if (username.split(":").length >= 2) {
+            tenantNameKeystone = username.split(":")[0];
+            userNameKeystone = username.split(":")[1];
+        }
+
+        String content = "{\"auth\": {\"identity\": {\"methods\": [\"password\"],\"password\": {\"user\":{\"domain\": {\"name\": \"d_Stacksync\"},\"name\": \""+userNameKeystone+"\",\"password\": \""+password+"\"}}},\"scope\": {\"project\": {\"domain\": {\"name\": \"d_Stacksync\"},\"name\": \""+tenantNameKeystone+"\"}}}}";
+        //String content = "{\"auth\": {\"passwordCredentials\": {\"username\": \"" + userNameKeystone + "\", \"password\": \"" + password + "\"}, \"tenantName\":\"" + tenantNameKeystone + "\"}}";
+
+        HttpPost method = new HttpPost(authenticationURL);
+        method.getParams().setIntParameter("http.socket.timeout", connectionTimeOut);
+        method.setHeader("Content-type", "application/json");
+
+        InputStream stream = new ByteArrayInputStream(content.getBytes("UTF-8"));
+        InputStreamEntity entity = new InputStreamEntity(stream, content.getBytes("UTF-8").length);
+        method.setEntity(entity);
+
+        stream.close();
+
+        FilesResponse response = new FilesResponse(client.execute(method));
+
+        if (response.getStatusCode() == 401) {
+            throw new UnauthorizeException("Incorrect user/password.", response.getResponseHeaders(), response.getStatusLine());
+        }
+
+        InputStream in = response.getResponseBodyAsStream();
+        String outString = IOUtils.toString(in, "UTF-8");
+        in.close();
+        
+        Header header = response.getResponseHeaders("X-Subject-Token")[0];
+        authToken = header.getValue();
+
+        JsonElement jelement = new JsonParser().parse(outString);
+        JsonObject jobject = jelement.getAsJsonObject();
+
+        //jobject = jelement.getAsJsonObject();
+        jobject = jobject.getAsJsonObject("token");
+
+        JsonArray jarray = jobject.getAsJsonArray("catalog");
+
+        for (JsonElement serviceCatalog : jarray) {
+            JsonObject jsonLineItem = serviceCatalog.getAsJsonObject();
+
+            String value = jsonLineItem.get("type").getAsString();
+
+            if (value.compareTo("object-store") == 0) {
+                JsonArray jarray2 = jsonLineItem.getAsJsonArray("endpoints");
+                
+                for (JsonElement endpoint : jarray2) {
+                    JsonObject endpointObject = endpoint.getAsJsonObject();
+                    String publicURL = endpointObject.get("interface").getAsString();
+                    if (publicURL.compareTo("public") == 0) {
+                        storageURL = endpointObject.get("url").getAsString();
+                        isLoggedin = true;
+                        cdnManagementURL = "";
+
+                        break;
+                    }
+                }
+            }
+        }
+
+        logger.debug("storageURL: " + storageURL);
+        logger.debug("authToken: " + authToken);
+        logger.debug("cdnManagementURL:" + cdnManagementURL);
+        logger.debug("ConnectionManager:" + client.getConnectionManager());
+
+        return isLoggedin;
+    }
 
     /**
      * Log in to CloudFiles. This method performs the authentication and sets up
