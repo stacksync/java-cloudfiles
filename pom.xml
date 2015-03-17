@@ -4,7 +4,7 @@
 
 	<groupId>java-cloudfiles</groupId>
 	<artifactId>java-cloudfiles</artifactId>
-	<version>1.5</version>
+	<version>1.6</version>
 	<packaging>jar</packaging>
 
 	<name>java-cloudfiles</name>

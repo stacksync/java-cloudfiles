@@ -3086,6 +3086,77 @@ public class FilesClient {
                     null, null);
         }
     }
+    
+    /**
+     * Delete the given object from it's container.
+     *
+     * @param container The container name
+     * @param objName The object name
+     * @return FilesConstants.OBJECT_DELETED
+     * @throws IOException There was an IO error doing network communication
+     * @throws HttpException There was an error with the http protocol
+     * @throws FilesException
+     */
+    public void deleteSharedObject(String sharedStorageURL, String container, String objName)
+            throws IOException, FilesNotFoundException, HttpException,
+            FilesException {
+        if (this.isLoggedin()) {
+            if (isValidContainerName(container) && isValidObjectName(objName)) {
+                HttpDelete method = null;
+                try {
+                    method = new HttpDelete(sharedStorageURL + "/"
+                            + sanitizeForURI(container) + "/"
+                            + sanitizeForURI(objName));
+                    method.getParams().setIntParameter("http.socket.timeout",
+                            connectionTimeOut);
+                    method.setHeader(FilesConstants.X_AUTH_TOKEN, authToken);
+                    FilesResponse response = new FilesResponse(
+                            client.execute(method));
+
+                    if (response.getStatusCode() == HttpStatus.SC_UNAUTHORIZED) {
+                        method.abort();
+                        login();
+                        method = new HttpDelete(sharedStorageURL + "/"
+                                + sanitizeForURI(container) + "/"
+                                + sanitizeForURI(objName));
+                        method.getParams().setIntParameter(
+                                "http.socket.timeout", connectionTimeOut);
+                        method.getParams().setIntParameter(
+                                "http.socket.timeout", connectionTimeOut);
+                        method.setHeader(FilesConstants.X_AUTH_TOKEN, authToken);
+                        response = new FilesResponse(client.execute(method));
+                    }
+
+                    if (response.getStatusCode() == HttpStatus.SC_NO_CONTENT) {
+                        logger.debug("Object Deleted : " + objName);
+                    } else if (response.getStatusCode() == HttpStatus.SC_NOT_FOUND) {
+                        throw new FilesNotFoundException(
+                                "Object was not found " + objName,
+                                response.getResponseHeaders(),
+                                response.getStatusLine());
+                    } else {
+                        throw new FilesException(
+                                "Unexpected status from server",
+                                response.getResponseHeaders(),
+                                response.getStatusLine());
+                    }
+                } finally {
+                    if (method != null) {
+                        method.abort();
+                    }
+                }
+            } else {
+                if (!isValidObjectName(objName)) {
+                    throw new FilesInvalidNameException(objName);
+                } else {
+                    throw new FilesInvalidNameException(container);
+                }
+            }
+        } else {
+            throw new FilesAuthorizationException("You must be logged in",
+                    null, null);
+        }
+    }
 
     /**
      * Get an object's metadata
